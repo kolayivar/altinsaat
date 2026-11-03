@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="description" content="Altın Saat — hastane öncesi acil müdahale eğitim simülasyonu. Tarayıcıda ücretsiz deneyin.">
+<title>Altın Saat</title>
+<style>
+  :root { --bg:#0d1014; --panel:#151a21; --ink:#f2efe8; --mute:#9aa3ad; --gold:#e3b341; --red:#d64545; }
+  :root { color-scheme: dark; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow:hidden; }
+  #game { position:fixed; inset:0; width:100%; height:100%; display:block; background:#000; touch-action:none; }
+  #intro { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; background:radial-gradient(ellipse at 50% 30%, #1c232d 0%, var(--bg) 70%); z-index:5; }
+  .card { width:100%; max-width:440px; text-align:center; }
+  .mark { width:64px; height:64px; margin:0 auto 14px; border-radius:16px; background:linear-gradient(160deg,var(--red),#8f2424); display:grid; place-items:center; box-shadow:0 8px 30px rgba(214,69,69,.35); }
+  .mark svg { width:34px; height:34px; }
+  h1 { margin:0 0 4px; font-size:30px; letter-spacing:.5px; }
+  h1 span { color:var(--gold); }
+  .sub { margin:0 0 22px; color:var(--mute); font-size:15px; line-height:1.45; }
+  button { font:inherit; font-weight:600; font-size:17px; color:#111; background:var(--gold); border:0; border-radius:12px; padding:14px 28px; cursor:pointer; width:100%; max-width:320px; }
+  button:active { transform:translateY(1px); }
+  .bar { height:8px; border-radius:8px; background:#252c36; overflow:hidden; margin:18px auto 8px; max-width:320px; display:none; }
+  .bar i { display:block; height:100%; width:0; background:linear-gradient(90deg,var(--gold),#f5d27a); transition:width .2s; }
+  .status { color:var(--mute); font-size:14px; min-height:20px; }
+  .notes { margin:24px auto 0; max-width:360px; text-align:left; color:var(--mute); font-size:13px; line-height:1.55; padding:12px 14px; border:1px solid #232a33; border-radius:10px; background:rgba(21,26,33,.6); }
+  .notes b { color:var(--ink); font-weight:600; }
+  #rotate { position:fixed; inset:0; z-index:8; display:none; align-items:center; justify-content:center; text-align:center; padding:24px; background:var(--bg); color:var(--ink); font-size:17px; line-height:1.5; }
+  #rotate svg { width:56px; height:56px; display:block; margin:0 auto 12px; }
+  .err { color:#ff8a8a; }
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="-1"></canvas>
+
+<div id="intro">
+  <div class="card">
+    <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
+    <h1>Altın <span>Saat</span></h1>
+    <p class="sub">Hastane öncesi acil müdahale simülasyonu<br>Tarayıcı deneme sürümü</p>
+    <button id="start">Oyunu başlat</button>
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="status" id="status"></div>
+    <div class="notes">
+      <b>İlk açılış 1–2 dakika sürebilir</b> (oyun yaklaşık 110 MB). Wi-Fi önerilir.<br>
+      Telefonda <b>yatay</b> tutun. Bilgisayarda Chrome veya Edge en iyi sonucu verir.<br>
+      Ekip modu ve daha net grafikler telefon ve bilgisayar uygulamasındadır.
+    </div>
+  </div>
+</div>
+
+<div id="rotate">
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M21 12a9 9 0 0 1-9 9M3 12a9 9 0 0 1 9-9"/></svg>
+  Telefonu yan çevirin</div>
+</div>
+
+<script>window.PEMS_MANIFEST = {"version": "1.10.4", "total": 116146522, "loader": "loader.js", "framework": ["framework.wasm"], "wasm": ["code.wasm"], "data": ["data0.wasm", "data1.wasm", "data2.wasm", "data3.wasm", "data4.wasm", "data5.wasm", "data6.wasm"]};</script>
+<script>
+(function () {
+  var M = window.PEMS_MANIFEST; // written by the build packer: { loader, framework:[...], wasm:[...], data:[...], sizes:{...}, total }
+  var startBtn = document.getElementById("start"), bar = document.getElementById("bar"), fill = document.getElementById("fill"), status = document.getElementById("status");
+  var isPhone = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
+  var started = false;
+
+  function checkRotate() {
+    var r = document.getElementById("rotate");
+    r.style.display = started && isPhone && window.innerHeight > window.innerWidth ? "flex" : "none";
+  }
+  window.addEventListener("resize", checkRotate);
+
+  function setProgress(p, text) { fill.style.width = Math.round(p * 100) + "%"; if (text) status.textContent = text; }
+
+  var loaded = 0;
+  function fetchParts(parts) {
+    var blobs = [];
+    var i = 0;
+    function next() {
+      if (i >= parts.length) return Promise.resolve(URL.createObjectURL(new Blob(blobs)));
+      var url = parts[i++];
+      return fetch(url).then(function (r) {
+        if (!r.ok) throw new Error(url + " " + r.status);
+        if (!r.body || !r.body.getReader) return r.blob().then(function (b) { loaded += b.size; blobs.push(b); report(); return next(); });
+        var reader = r.body.getReader(), chunks = [];
+        function pump() {
+          return reader.read().then(function (res) {
+            if (res.done) { blobs.push(new Blob(chunks)); return next(); }
+            chunks.push(res.value); loaded += res.value.length; report(); return pump();
+          });
+        }
+        return pump();
+      });
+    }
+    return next();
+  }
+  function report() {
+    var p = Math.min(1, loaded / M.total);
+    setProgress(p * 0.85, "İndiriliyor… %" + Math.round(p * 100) + "  (" + (loaded / 1048576).toFixed(0) + " / " + (M.total / 1048576).toFixed(0) + " MB)");
+  }
+
+  function loadScript(src) {
+    return new Promise(function (ok, bad) { var s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = function () { bad(new Error(src)); }; document.body.appendChild(s); });
+  }
+
+  startBtn.addEventListener("click", function () {
+    if (started) return;
+    started = true;
+    startBtn.style.display = "none";
+    bar.style.display = "block";
+    setProgress(0, "Hazırlanıyor…");
+    try { if (window.speechSynthesis) { var u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } } catch (e) {}   // iOS: unlock speech on the tap
+    var urls = {};
+    Promise.all([loadScript(M.loader), fetchParts(M.framework).then(function (u) { urls.framework = u; }),
+                 fetchParts(M.wasm).then(function (u) { urls.wasm = u; }), fetchParts(M.data).then(function (u) { urls.data = u; })])
+      .then(function () {
+        setProgress(0.88, "Oyun açılıyor…");
+        var canvas = document.getElementById("game");
+        return createUnityInstance(canvas, {
+          dataUrl: urls.data, frameworkUrl: urls.framework, codeUrl: urls.wasm,
+          streamingAssetsUrl: ".", companyName: "Altin Saat", productName: "Altın Saat", productVersion: M.version,
+          devicePixelRatio: isPhone ? Math.min(window.devicePixelRatio || 1, 2) : 0,
+          matchWebGLToCanvasSize: true, autoSyncPersistentDataPath: true,
+          showBanner: function (msg, type) { if (type === "error") { status.innerHTML = '<span class="err">' + msg + '</span>'; } }
+        }, function (p) { setProgress(0.88 + p * 0.12, "Oyun açılıyor… %" + Math.round(p * 100)); });
+      })
+      .then(function () {
+        document.getElementById("intro").style.display = "none";
+        checkRotate();
+        if (isPhone && document.documentElement.requestFullscreen) { document.documentElement.requestFullscreen().catch(function () {}); }
+      })
+      .catch(function (e) {
+        status.innerHTML = '<span class="err">Açılamadı: ' + (e && e.message ? e.message : e) + '<br>Sayfayı yenileyip tekrar deneyin. Telefon belleği yetmiyorsa bilgisayardan açın.</span>';
+      });
+  });
+})();
+</script>
+</body>
+</html>
